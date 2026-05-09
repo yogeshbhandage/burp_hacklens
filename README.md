@@ -19,7 +19,7 @@ A passive Burp Suite extension that automatically scans HTTP responses for expos
 
 ## Requirements
 
-- Burp Suite (Community or Pro)
+- Burp Suite Pro
 - [Jython 2.7 standalone JAR](https://www.jython.org/download)
 
 ---
