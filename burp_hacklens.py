@@ -439,6 +439,21 @@ SECRET_PATTERNS = [
     {"name": ".git exposure",
      "severity": "HIGH",
      "pattern": r"(?i)(href|src|url|path)\s*[=:]\s*[\"'][^\"']*\.git(/|[\"'])"},
+
+    # ---- Hardcoded Default / Weak Credentials --------------
+    # skip_fp=True bypasses _is_fp so short values like "admin" are not filtered
+    {"name": "Hardcoded Default Credential (password key)",
+     "severity": "HIGH",
+     "skip_fp": True,
+     "pattern": r"(?i)\b(password|passwd|pwd)\s*[:=]\s*[\"'](admin|password|password123|123456|12345678|1234567890|qwerty|abc123|letmein|welcome|welcome1|monkey|dragon|master|root|toor|pass|1q2w3e4r|admin123|test123|guest|default|changeme|secret|login|pass123|administrator|passw0rd|p@ssword|p@ss123|admin@123)[\"']"},
+    {"name": "Hardcoded Default Credential (JSON)",
+     "severity": "HIGH",
+     "skip_fp": True,
+     "pattern": r"(?i)[\"']password[\"']\s*:\s*[\"'](admin|password|password123|123456|12345678|1234567890|qwerty|abc123|letmein|welcome|welcome1|monkey|dragon|master|root|toor|pass|1q2w3e4r|admin123|test123|guest|default|changeme|secret|login|pass123|administrator|passw0rd|p@ssword|p@ss123|admin@123)[\"']"},
+    {"name": "Hardcoded Default Username",
+     "severity": "MEDIUM",
+     "skip_fp": True,
+     "pattern": r"(?i)\b(username|user|login|uname)\s*[:=]\s*[\"'](admin|root|test|guest|administrator|superuser|sysadmin|operator)[\"']"},
 ]
 
 # ============================================================
@@ -475,6 +490,11 @@ def _is_fp(value):
     # Pure sequential digits
     if re.match(r'^[0-9]+$', v) and len(v) < 12:
         return True
+    # Pure alphabetical / hyphenated words (e.g. "Passwort", "Wachtwoord",
+    # "Mot de passe", "Palavra-passe") - these are i18n translation labels,
+    # not real secrets. Real passwords always contain a digit or special char.
+    if re.match(r'^[A-Za-z][A-Za-z\s\-]{4,28}$', v):
+        return True
     return False
 
 
@@ -504,7 +524,10 @@ def scan_body_for_secrets(body_str, url):
         for m in matches:
             value = m[-1] if isinstance(m, tuple) else m
             value = value.strip() if value else ""
-            if not value or _is_fp(value):
+            if not value:
+                continue
+            # skip_fp=True patterns bypass the FP filter (e.g. default credentials)
+            if not p.get("skip_fp", False) and _is_fp(value):
                 continue
 
             key = (p["name"], value[:80])
