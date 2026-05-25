@@ -445,11 +445,11 @@ SECRET_PATTERNS = [
     {"name": "Hardcoded Default Credential (password key)",
      "severity": "HIGH",
      "skip_fp": True,
-     "pattern": r"(?i)\b(password|passwd|pwd)\s*[:=]\s*[\"'](admin|password|password123|123456|12345678|1234567890|qwerty|abc123|letmein|welcome|welcome1|monkey|dragon|master|root|toor|pass|1q2w3e4r|admin123|test123|guest|default|changeme|secret|login|pass123|administrator|passw0rd|p@ssword|p@ss123|admin@123)[\"']"},
+     "pattern": r"(?i)\b(password|passwd|pwd)\s*[:=]\s*[\"'](admin|password123|123456|12345678|1234567890|qwerty|abc123|letmein|welcome|welcome1|monkey|dragon|master|root|toor|1q2w3e4r|admin123|test123|guest|pass123|administrator|passw0rd|p@ssword|p@ss123|admin@123)[\"']"},
     {"name": "Hardcoded Default Credential (JSON)",
      "severity": "HIGH",
      "skip_fp": True,
-     "pattern": r"(?i)[\"']password[\"']\s*:\s*[\"'](admin|password|password123|123456|12345678|1234567890|qwerty|abc123|letmein|welcome|welcome1|monkey|dragon|master|root|toor|pass|1q2w3e4r|admin123|test123|guest|default|changeme|secret|login|pass123|administrator|passw0rd|p@ssword|p@ss123|admin@123)[\"']"},
+     "pattern": r"(?i)[\"']password[\"']\s*:\s*[\"'](admin|password123|123456|12345678|1234567890|qwerty|abc123|letmein|welcome|welcome1|monkey|dragon|master|root|toor|1q2w3e4r|admin123|test123|guest|pass123|administrator|passw0rd|p@ssword|p@ss123|admin@123)[\"']"},
     {"name": "Hardcoded Default Username",
      "severity": "MEDIUM",
      "skip_fp": True,
@@ -458,6 +458,36 @@ SECRET_PATTERNS = [
 
 # ============================================================
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+# Domains to skip entirely - third-party CDNs / analytics with no secrets
+EXCLUDED_DOMAINS = (
+    ".google.com",
+    ".googleapis.com",
+    ".gstatic.com",
+    ".youtube.com",
+    ".doubleclick.net",
+    ".googletagmanager.com",
+    ".googleadservices.com",
+    ".googlesyndication.com",
+    ".facebook.net",
+    ".facebook.com",
+    ".twitter.com",
+    ".linkedin.com",
+    ".jquery.com",
+    ".cloudflare.com",
+    ".bootstrapcdn.com",
+    ".jsdelivr.net",
+    ".unpkg.com",
+)
+
+def _is_excluded_domain(url_str):
+    """Return True if the URL host matches any excluded domain suffix."""
+    try:
+        host = url_str.lower().split("//")[-1].split("/")[0].split(":")[0]
+        return any(host == d.lstrip(".") or host.endswith(d)
+                   for d in EXCLUDED_DOMAINS)
+    except Exception:
+        return False
 
 # Global dedup - persists for entire Burp session
 _GLOBAL_SEEN      = set()
@@ -476,6 +506,8 @@ _FP_EXACT = {
     "abcdefgh", "abcdefghij", "xxxxxxxx", "xxxxxxxxxxxxxxxxxxxx",
     "todo", "fixme", "<api-key>", "<secret>", "<your-key>",
     "<token>", "<password>", "key", "token", "value",
+    "%filtered%", "%password%", "%secret%", "%value%", "%token%",
+    "****", "[redacted]", "[hidden]", "[removed]",
 }
 
 def _is_fp(value):
@@ -490,9 +522,10 @@ def _is_fp(value):
     # Pure sequential digits
     if re.match(r'^[0-9]+$', v) and len(v) < 12:
         return True
-    # Pure alphabetical / hyphenated words (e.g. "Passwort", "Wachtwoord",
-    # "Mot de passe", "Palavra-passe") - these are i18n translation labels,
-    # not real secrets. Real passwords always contain a digit or special char.
+    # Template / sanitized placeholders e.g. %filtered%, ${SECRET}, {{key}}
+    if re.match(r'^[%$#{}\[\]<>]', v) or '%' in v:
+        return True
+    # Pure alphabetical / hyphenated words (i18n translations like "Passwort")
     if re.match(r'^[A-Za-z][A-Za-z\s\-]{4,28}$', v):
         return True
     return False
@@ -976,7 +1009,11 @@ class BurpExtender(IBurpExtender, IScannerCheck, IHttpListener):
         except Exception:
             return
 
-        url      = str(self._helpers.analyzeRequest(messageInfo).getUrl())
+        url = str(self._helpers.analyzeRequest(messageInfo).getUrl())
+
+        # Skip excluded domains
+        if _is_excluded_domain(url):
+            return
         findings = scan_body_for_secrets(body_str, url)
         if not findings:
             return
@@ -1035,8 +1072,12 @@ class BurpExtender(IBurpExtender, IScannerCheck, IHttpListener):
         except Exception:
             return []
 
-        url      = str(self._helpers.analyzeRequest(
+        url = str(self._helpers.analyzeRequest(
                        base_request_response).getUrl())
+
+        # Skip excluded domains
+        if _is_excluded_domain(url):
+            return []
         findings = scan_body_for_secrets(body_str, url)
         if not findings:
             return []
